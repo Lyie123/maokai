@@ -1,4 +1,5 @@
 import requests
+from requests.exceptions import InvalidHeader
 import pandas as pd
 import re
 import json
@@ -60,7 +61,7 @@ class RiotApi:
         elif r.status_code == 401:
             raise Exception('unauthorized: {0}'.format(query))
         elif r.status_code == 403:
-            raise Exception('forbidden: {0}'.format(query))
+            raise InvalidHeader('forbidden: {0}'.format(query))
         elif r.status_code == 404:
             raise NoResultFound('data not found: {0}'.format(query))
         elif r.status_code == 405:

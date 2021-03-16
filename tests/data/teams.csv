@@ -1,0 +1,3 @@
+game_id,team_id,win,first_blood,first_tower,first_inhibitor,first_baron,first_dragon,first_rift_herald,tower_kills,inhibitor_kills,baron_kills,dragon_kills,vilemaw_kills,rift_herald_kills,dominion_victory_score
+5148931825,100,Win,True,True,True,False,True,False,10,2,0,3,0,0,0
+5148931825,200,Fail,False,False,False,True,False,True,6,0,1,3,0,1,0
