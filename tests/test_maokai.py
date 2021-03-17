@@ -40,7 +40,7 @@ class TestLeagueApi:
         return df
 
     def test_wrong_api_key(self):
-        with pytest.raises(InvalidHeader):
+        with pytest.raises(Exception):
             RiotApi('not-valid-key').get_summoner(summoner_name='RonjaRaumpilot')
 
     @pytest.mark.parametrize('kwargs', [

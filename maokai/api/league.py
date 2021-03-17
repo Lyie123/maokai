@@ -4,8 +4,10 @@ import pandas as pd
 import re
 import json
 import logging                                  # https://docs.python.org/3/howto/logging.html#logging-basic-tutorial
+from collections import deque
 from typing import Dict
 from time import sleep
+from datetime import datetime
 from sqlalchemy.orm.exc import NoResultFound
 from enum import Enum
 # import unicodedata
@@ -15,18 +17,42 @@ logging.basicConfig(filename='league_api.log', level=logging.INFO, format='%(asc
 regions = {
     'EUW': 'https://euw1.api.riotgames.com'
 }
+
 endpoints = {
-    'summoner_v4': [
-        '{base_uri}/lol/summoner/v4/summoners/by-account/{encryptedAccountId}',
-        '{base_uri}/lol/summoner/v4/summoners/by-name/{summonerName}',
-        '{base_uri}/lol/summoner/v4/summoners/by-puuid/{encryptedPUUID}',
-        '{base_uri}/lol/summoner/v4/summoners/{encryptedSummonerId}'
-    ],
-    'match_v4': [
-        '{base_uri}/lol/match/v4/matchlists/by-account/{encryptedAccountId}',
-        '{base_uri}/lol/match/v4/matches/{matchId}',
-        '{base_uri}/lol/match/v4/timelines/by-match/{matchId}'
-    ]
+    'summoner_v4': { 
+        'by_account': '{base_uri}/lol/summoner/v4/summoners/by-account/{encryptedAccountId}',
+        'by_name': '{base_uri}/lol/summoner/v4/summoners/by-name/{summonerName}',
+        'by_puuid': '{base_uri}/lol/summoner/v4/summoners/by-puuid/{encryptedPUUID}',
+        'by_id': '{base_uri}/lol/summoner/v4/summoners/{encryptedSummonerId}'
+    },
+    'match_v4': {
+        'list': '{base_uri}/lol/match/v4/matchlists/by-account/{encryptedAccountId}',
+        'details': '{base_uri}/lol/match/v4/matches/{matchId}',
+        'timeline': '{base_uri}/lol/match/v4/timelines/by-match/{matchId}'
+    },
+    'league_v4': {
+        'challenger': '{base_uri}/lol/league/v4/challengerleagues/by-queue/{queue_type}',
+        'grandmaster': '{base_uri}/lol/league/v4/grandmasterleagues/by-queue/{queue_type}',
+        'master': '{base_uri}/lol/league/v4/masterleagues/by-queue/{queue_type}',
+        'entries': '{base_uri}/lol/league/v4/entries/by-summoner/{encryptedSummonerId}'
+    },
+    'ddragon': {
+        'champion': 'http://ddragon.leagueoflegends.com/cdn/{local}/data/en_US/champion.json',
+        'version': 'https://ddragon.leagueoflegends.com/api/versions.json',
+        'queues': 'http://static.developer.riotgames.com/docs/lol/queues.json'
+    }
+}
+
+status_codes = {
+    400: 'bad request',
+    401: 'unauthorized',
+    403: 'forbidden',
+    404: 'data not found',
+    405: 'method not allowed',
+    415: 'unsupported media type',
+    429: 'rate limit exceeded',
+    500: 'internal server error',
+    504: 'service unavaiable'
 }
 
 class QueueType(Enum):
@@ -46,6 +72,7 @@ class RiotApi:
         }
         self._query_delay_time = 0.1
         self._version = self.get_latest_version()
+        self._api_calls = deque(maxlen=100)
 
     def __snake_case(self, camel_case: str) -> str:
         return re.sub(r'(?<!^)(?=[A-Z])', '_', camel_case).lower()
@@ -54,20 +81,16 @@ class RiotApi:
         sleep(self._query_delay_time)
         r = requests.get(query, headers=self._header)
 
+        # query was succesful 
         if r.status_code == 200:
+            self._api_calls.append('{time}: {query}'.format(time=datetime.now(), query=query))
             return r.json()
-        elif r.status_code == 400:
-            raise Exception('bad request: {0}'.format(query))
-        elif r.status_code == 401:
-            raise Exception('unauthorized: {0}'.format(query))
-        elif r.status_code == 403:
-            raise InvalidHeader('forbidden: {0}'.format(query))
-        elif r.status_code == 404:
-            raise NoResultFound('data not found: {0}'.format(query))
-        elif r.status_code == 405:
-            raise Exception('method not allowed: {0}'.format(query))
-        elif r.status_code == 415:
-            raise Exception('unsupported media type: {0}'.format(query))
+        
+        # something went wrong...
+        elif r.status_code in(400, 401, 403, 404, 405, 415, 500, 503, 504):
+            raise Exception('{0} {1}: {2}'.format(r.status_code, status_codes[r.status_code], query))
+        
+        # bad request
         elif r.status_code == 429:
             logging.warning('Rate limit exceeded. Sleep 121 seconds.')
             sleep(125)
@@ -77,17 +100,8 @@ class RiotApi:
             except Exception:
                 if r.status_code != 200:
                     raise Exception('Repeated Error after rate limited exceeded and 125 seconds timeout')
-        elif r.status_code == 500:
-            raise Exception('internal server error')
-        elif r.status_code == 503:
-            raise Exception('service unavaiable')
-        elif r.status_code == 504:
-            sleep(5)
-            try:
-                r = requests.get(query, headers=self._header)
-                return r.json()
-            except Exception:
-                raise Exception('Gateway timeout...')
+
+        # bad request, unknown status code
         else:
             raise Exception('unknown error code {0} on requesting {1}'.format(r.status_code, query))
 
@@ -108,17 +122,17 @@ class RiotApi:
         """
 
         if 'summoner_id' in kwargs:
-            query = endpoints['summoner_v4'][3].format(base_uri=self._base_uri,
-                                                       encryptedSummonerId=kwargs['summoner_id'])
+            query = endpoints['summoner_v4']['by_id'].format(base_uri=self._base_uri,
+                                                             encryptedSummonerId=kwargs['summoner_id'])
         elif 'account_id' in kwargs:
-            query = endpoints['summoner_v4'][0].format(base_uri=self._base_uri,
-                                                      encryptedAccountId=kwargs['account_id'])
+            query = endpoints['summoner_v4']['by_account'].format(base_uri=self._base_uri,
+                                                                  encryptedAccountId=kwargs['account_id'])
         elif 'summoner_name' in kwargs:
-            query = endpoints['summoner_v4'][1].format(base_uri=self._base_uri,
-                                                       summonerName=kwargs['summoner_name'])
+            query = endpoints['summoner_v4']['by_name'].format(base_uri=self._base_uri,
+                                                               summonerName=kwargs['summoner_name'])
         elif 'puuid' in kwargs:
-            query = endpoints['summoner_v4'][2].format(base_uri=self._base_uri,
-                                                       encryptedPUUID=kwargs['puuid'])
+            query = endpoints['summoner_v4']['by_puuid'].format(base_uri=self._base_uri,
+                                                                encryptedPUUID=kwargs['puuid'])
         else:
             raise ValueError('[summoner_id, account_id, summoner_name, puuid] is needed to get summoner data')
 
@@ -156,7 +170,7 @@ class RiotApi:
         """
         optional = ['champion', 'queue', 'season', 'endTime', 'beginTime', 'endIndex', 'beginIndex']
         if 'account_id' in kwargs:
-            query = endpoints['match_v4'][0].format(base_uri=self._base_uri,
+            query = endpoints['match_v4']['list'].format(base_uri=self._base_uri,
                                                     encryptedAccountId=kwargs['account_id'])
 
             query_filter = ['{0}={1}'.format(k, v) for k, v in kwargs.items() if k in optional and v is not None]
@@ -173,7 +187,7 @@ class RiotApi:
             raise ValueError('[summoner_id, account_id, summoner_name, puuid] is needed to get match history of summoner')
 
     def get_match_details(self, match_id: str) -> Dict[str, pd.DataFrame]:
-        query = endpoints['match_v4'][1].format(base_uri=self._base_uri,
+        query = endpoints['match_v4']['details'].format(base_uri=self._base_uri,
                                                 matchId=match_id)
 
         result = self.__post_query(query)
@@ -186,7 +200,7 @@ class RiotApi:
         return frames
 
     def get_timeline(self, match_id: str) -> Dict[str, pd.DataFrame]:
-        query = endpoints['match_v4'][2].format(base_uri=self._base_uri,
+        query = endpoints['match_v4']['timeline'].format(base_uri=self._base_uri,
                                                 matchId=match_id)
 
         result = self.__post_query(query)
@@ -219,27 +233,42 @@ class RiotApi:
         return frames
 
     def get_challenger_leaderboard(self, queue_type: QueueType) -> Dict[str, pd.DataFrame]:
-        query = '{base_uri}/lol/league/v4/challengerleagues/by-queue/{queue_type}'.format(base_uri=self._base_uri,
-                                                                                          queue_type=queue_type.value)
+        query = endpoints['league_v4']['challenger'].format(base_uri=self._base_uri,
+                                                            queue_type=queue_type.value)
         result = self.__post_query(query)
         return self.__extract_leaderboard(result)
 
     def get_grandmaster_leaderboard(self, queue_type: QueueType) -> Dict[str, pd.DataFrame]:
-        query = '{base_uri}/lol/league/v4/grandmasterleagues/by-queue/{queue_type}'.format(base_uri=self._base_uri,
-                                                                                           queue_type=queue_type.value)
+        query = endpoints['league_v4']['grandmaster'].format(base_uri=self._base_uri,
+                                                             queue_type=queue_type.value)
         result = self.__post_query(query)
         return self.__extract_leaderboard(result)
 
     def get_master_leaderboard(self, queue_type: QueueType) -> Dict[str, pd.DataFrame]:
-        query = '{base_uri}/lol/league/v4/masterleagues/by-queue/{queue_type}'.format(base_uri=self._base_uri,
-                                                                                          queue_type=queue_type.value)
+        query = endpoints['league_v4']['master'].format(base_uri=self._base_uri,
+                                                        queue_type=queue_type.value)
         result = self.__post_query(query)
         return self.__extract_leaderboard(result)
 
     def get_league_entries_of_summoner(self, **kwargs) -> pd.DataFrame:
+        """Query the riot api for the league entries of a summoner.
+
+        One of the following parameters have to be provided:
+        :param summoner_id: query summoner by summoner_id.
+        :param account_id: query summoner by account_id.
+        :param summoner_name: query summoner by summoner_name.
+        :param puuid: query summoner by puuid.
+
+        Raises:
+            ValueError: thrown if none of [summoner_id, account_id, summoner_name, puuid] gets provided.
+
+        Returns:
+            pd.Dataframe: contains information about league entries of the summoner by the riot api.
+        """
+
         if 'summoner_id' in kwargs:
-            query = '{base_uri}/lol/league/v4/entries/by-summoner/{encryptedSummonerId}'.format(base_uri=self._base_uri,
-                                                                                                encryptedSummonerId=kwargs['summoner_id'])
+            query = endpoints['league_v4']['entries'].format(base_uri=self._base_uri,
+                                                             encryptedSummonerId=kwargs['summoner_id'])
             result = self.__post_query(query)
             df_entries = pd.DataFrame()
             for entry in result:
@@ -255,7 +284,7 @@ class RiotApi:
             summoner = self.get_summoner(**kwargs).reset_index().iloc[0, :]
             return self.get_league_entries_of_summoner(**{**summoner.to_dict(), **kwargs})
         else:
-            raise ValueError('[summoner_id, account_id, summoner_name, puuid] is needed to get match history of summoner')
+            raise ValueError('[summoner_id, account_id, summoner_name, puuid] is needed to get league entries of summoner')
 
     def __extract_match_data(self, data: json) -> Dict[str, pd.DataFrame]:
         game = pd.json_normalize(data)
@@ -313,13 +342,13 @@ class RiotApi:
         return {'league_entry': df_entry, 'league_entries': df_entries}
 
     def get_queue_types(self) -> pd.DataFrame:
-        df_result = pd.read_json('http://static.developer.riotgames.com/docs/lol/queues.json')
+        df_result = pd.read_json(endpoints['ddragon']['queues'])
         df_result.columns = map(self.__snake_case, df_result.columns)
         df_result = df_result.set_index('queue_id')
         return df_result
 
     def get_champion_data(self) -> pd.DataFrame:
-        content = requests.get('http://ddragon.leagueoflegends.com/cdn/{0}/data/en_US/champion.json'.format(self._version)).json()
+        content = requests.get(endpoints['ddragon']['champion'].format(local=self._version)).json()
         table = pd.DataFrame()
         for value in content['data'].values():
             table = table.append(pd.json_normalize(value, sep='_'), ignore_index=True)
@@ -332,7 +361,7 @@ class RiotApi:
         return table
 
     def get_versions(self) -> pd.DataFrame:
-        versions = requests.get('https://ddragon.leagueoflegends.com/api/versions.json').json()
+        versions = requests.get(endpoints['ddragon']['version']).json()
         return pd.DataFrame(versions)
 
     def get_latest_version(self) -> str:
