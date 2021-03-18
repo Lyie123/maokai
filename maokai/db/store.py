@@ -5,19 +5,9 @@ from ..api.league import RiotApi, QueueType, logging
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-# from psycopg2.extensions import register_adapter, AsIs
-# from numpy import int64
 from .models.summoner import Summoner
-from .models.match import Match, Team, Ban, Participant, Stats
+from .models.match import Match
 from .common import Base
-from .models.timeline import TimelineEvents, TimelineParticipant
-import sqlite3
-import numpy as np
-
-
-# conversation numpy.int64 to int
-# register_adapter(int64, AsIs)
-# sqlite3.register_adapter(np.int64, lambda val: int(val))
 
 
 class LeagueDB:
@@ -25,6 +15,7 @@ class LeagueDB:
         self.engine = create_engine(con)
         self.Session = sessionmaker(bind=self.engine)
         self.api = RiotApi(api_key)
+        self.create_db_layout()
 
     def create_db_layout(self) -> None:
         Base.metadata.create_all(self.engine)
@@ -102,8 +93,8 @@ class LeagueDB:
         solo = self.api.get_challenger_leaderboard(QueueType.RANKED_SOLO)['league_entries']
         solo.to_sql(name='leaderboard_solo', con=self.engine, if_exists='replace')
 
-        # flex = self.api.get_challenger_leaderboard(api.QueueType.RANKED_FLEX)['league_entries']
-        # flex.to_sql(name='leaderboard_flex', con=self.engine, if_exists='replace')
+        flex = self.api.get_challenger_leaderboard(QueueType.RANKED_FLEX)['league_entries']
+        flex.to_sql(name='leaderboard_flex', con=self.engine, if_exists='replace')
 
     def _update_champions(self) -> None:
         champions = self.api.get_champion_data()

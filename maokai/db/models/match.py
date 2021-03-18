@@ -5,7 +5,7 @@ from ..common import Base
 class Match(Base):
     __tablename__ = 'matches'
 
-    game_id = Column(String, primary_key=True)
+    game_id = Column(Integer, primary_key=True)
 
     platform_id = Column(String)
     game_creation = Column(DateTime)
@@ -21,7 +21,7 @@ class Match(Base):
 class Team(Base):
     __tablename__ = 'teams'
 
-    game_id = Column(String, ForeignKey('matches.game_id', ondelete='CASCADE'), primary_key=True)
+    game_id = Column(Integer, ForeignKey('matches.game_id', ondelete='CASCADE'), primary_key=True)
     team_id = Column(String, primary_key=True)
 
     win = Column(String)
@@ -43,7 +43,7 @@ class Team(Base):
 class Ban(Base):
     __tablename__ = 'bans'
 
-    game_id = Column(String, ForeignKey('matches.game_id', ondelete='CASCADE'), primary_key=True)
+    game_id = Column(Integer, ForeignKey('matches.game_id', ondelete='CASCADE'), primary_key=True)
     team_id = Column(String, primary_key=True)
     pick_turn = Column(Integer, primary_key=True)
     champion_id = Column(Integer, primary_key=True)
@@ -52,7 +52,7 @@ class Ban(Base):
 class Participant(Base):
     __tablename__ = 'participants'
 
-    game_id = Column(String, ForeignKey('matches.game_id', ondelete='CASCADE'), primary_key=True)
+    game_id = Column(Integer, ForeignKey('matches.game_id', ondelete='CASCADE'), primary_key=True)
     participant_id = Column(String, primary_key=True)
 
     platform_id = Column(String)
@@ -68,7 +68,7 @@ class Participant(Base):
 class Stats(Base):
     __tablename__ = 'stats'
 
-    game_id = Column(String, ForeignKey('matches.game_id', ondelete='CASCADE'), primary_key=True)
+    game_id = Column(Integer, ForeignKey('matches.game_id', ondelete='CASCADE'), primary_key=True)
     team_id = Column(String, primary_key=True)
     participant_id = Column(String, primary_key=True)
     

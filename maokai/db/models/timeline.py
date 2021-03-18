@@ -5,7 +5,7 @@ from ..common import Base
 class TimelineParticipant(Base):
     __tablename__ = 'timeline_participants'
 
-    game_id = Column(String, ForeignKey('matches.game_id', ondelete='CASCADE'), primary_key=True)
+    game_id = Column(Integer, ForeignKey('matches.game_id', ondelete='CASCADE'), primary_key=True)
     timestamp = Column(Integer, primary_key=True)
     participant_id = Column(String, primary_key=True)
 
@@ -24,7 +24,7 @@ class TimelineParticipant(Base):
 class TimelineEvents(Base):
     __tablename__ = 'timeline_events'
 
-    game_id = Column(String, ForeignKey('matches.game_id', ondelete='CASCADE'), primary_key=True)
+    game_id = Column(Integer, ForeignKey('matches.game_id', ondelete='CASCADE'), primary_key=True)
     timestamp = Column(Integer, primary_key=True)
     participant_id = Column(String, primary_key=True)
     type = Column(String, primary_key=True)
