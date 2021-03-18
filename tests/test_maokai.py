@@ -1,6 +1,7 @@
 from maokai import __version__
-from maokai.api.league import RiotApi
+from maokai import RiotApi
 import pandas as pd
+from typing import Dict
 import pytest
 
 key = open('api_key').read().rstrip()
@@ -25,7 +26,7 @@ class TestLeagueApi:
         return df
 
     @pytest.fixture
-    def example_match_details(self) -> dict[str: pd.DataFrame]:
+    def example_match_details(self) -> Dict[str, pd.DataFrame]:
         bans = pd.read_csv('tests/data/bans.csv').set_index(['game_id', 'team_id', 'pick_turn'])
         matches = pd.read_csv('tests/data/matches.csv').set_index(['game_id'])
         participants = pd.read_csv('tests/data/participants.csv').set_index(['game_id', 'participant_id'])
