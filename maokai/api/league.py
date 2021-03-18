@@ -1,25 +1,24 @@
 import requests
-from requests.exceptions import InvalidHeader
 import pandas as pd
 import re
 import json
-import logging                                  # https://docs.python.org/3/howto/logging.html#logging-basic-tutorial
+import logging  # https://docs.python.org/3/howto/logging.html#logging-basic-tutorial
 from collections import deque
-from typing import Dict
+from typing import Dict, Union
 from time import sleep
 from datetime import datetime
-from sqlalchemy.orm.exc import NoResultFound
 from enum import Enum
-# import unicodedata
 
-logging.basicConfig(filename='league_api.log', level=logging.INFO, format='%(asctime)s %(message)s', datefmt='%d.%m.%Y %H:%M:%S')
+
+logging.basicConfig(filename='league_api.log', level=logging.INFO, format='%(asctime)s %(message)s',
+                    datefmt='%d.%m.%Y %H:%M:%S')
 
 regions = {
     'EUW': 'https://euw1.api.riotgames.com'
 }
 
 endpoints = {
-    'summoner_v4': { 
+    'summoner_v4': {
         'by_account': '{base_uri}/lol/summoner/v4/summoners/by-account/{encryptedAccountId}',
         'by_name': '{base_uri}/lol/summoner/v4/summoners/by-name/{summonerName}',
         'by_puuid': '{base_uri}/lol/summoner/v4/summoners/by-puuid/{encryptedPUUID}',
@@ -55,12 +54,14 @@ status_codes = {
     504: 'service unavaiable'
 }
 
+
 class QueueType(Enum):
     RANKED_SOLO = 'RANKED_SOLO_5x5'
     RANKED_FLEX = 'RANKED_FLEX_SR'
 
+
 class RiotApi:
-    def __init__(self, api_key: str, region: str='EUW') -> None:
+    def __init__(self, api_key: str, region: str = 'EUW') -> None:
         if region not in regions:
             raise ValueError('{region} is not a valid region'.format(region=region))
 
@@ -74,10 +75,11 @@ class RiotApi:
         self._version = self.get_latest_version()
         self._api_calls = deque(maxlen=100)
 
-    def __snake_case(self, camel_case: str) -> str:
+    @staticmethod
+    def __snake_case(camel_case: str) -> str:
         return re.sub(r'(?<!^)(?=[A-Z])', '_', camel_case).lower()
 
-    def __post_query(self, query: str) -> dict:
+    def __post_query(self, query: str) -> Dict:
         sleep(self._query_delay_time)
         r = requests.get(query, headers=self._header)
 
@@ -85,11 +87,11 @@ class RiotApi:
         if r.status_code == 200:
             self._api_calls.append('{time}: {query}'.format(time=datetime.now(), query=query))
             return r.json()
-        
+
         # something went wrong...
-        elif r.status_code in(400, 401, 403, 404, 405, 415, 500, 503, 504):
+        elif r.status_code in (400, 401, 403, 404, 405, 415, 500, 503, 504):
             raise Exception('{0} {1}: {2}'.format(r.status_code, status_codes[r.status_code], query))
-        
+
         # bad request
         elif r.status_code == 429:
             logging.warning('Rate limit exceeded. Sleep 121 seconds.')
@@ -171,7 +173,7 @@ class RiotApi:
         optional = ['champion', 'queue', 'season', 'endTime', 'beginTime', 'endIndex', 'beginIndex']
         if 'account_id' in kwargs:
             query = endpoints['match_v4']['list'].format(base_uri=self._base_uri,
-                                                    encryptedAccountId=kwargs['account_id'])
+                                                         encryptedAccountId=kwargs['account_id'])
 
             query_filter = ['{0}={1}'.format(k, v) for k, v in kwargs.items() if k in optional and v is not None]
             query = '{query}?{optional}'.format(query=query, optional='&'.join(query_filter))
@@ -184,11 +186,12 @@ class RiotApi:
             summoner = self.get_summoner(**kwargs).reset_index().iloc[0, :]
             return self.get_match_history(**{**summoner.to_dict(), **kwargs})
         else:
-            raise ValueError('[summoner_id, account_id, summoner_name, puuid] is needed to get match history of summoner')
+            raise ValueError(
+                '[summoner_id, account_id, summoner_name, puuid] is needed to get match history of summoner')
 
-    def get_match_details(self, match_id: str) -> Dict[str, pd.DataFrame]:
+    def get_match_details(self, match_id: Union[str, int]) -> Dict[str, pd.DataFrame]:
         query = endpoints['match_v4']['details'].format(base_uri=self._base_uri,
-                                                matchId=match_id)
+                                                        matchId=match_id)
 
         result = self.__post_query(query)
         frames = {}
@@ -199,9 +202,9 @@ class RiotApi:
         frames.update(self.__extract_stats_data(result))
         return frames
 
-    def get_timeline(self, match_id: str) -> Dict[str, pd.DataFrame]:
+    def get_timeline(self, match_id: Union[str, int]) -> Dict[str, pd.DataFrame]:
         query = endpoints['match_v4']['timeline'].format(base_uri=self._base_uri,
-                                                matchId=match_id)
+                                                         matchId=match_id)
 
         result = self.__post_query(query)
 
@@ -220,7 +223,7 @@ class RiotApi:
         df_participants['game_id'] = str(match_id)
         df_participants = df_participants.set_index(['game_id', 'timestamp', 'participant_id'])
 
-        df_events.columns =  map(self.__snake_case, df_events.columns)
+        df_events.columns = map(self.__snake_case, df_events.columns)
         df_events.participant_id = df_events.participant_id.fillna('0')
         df_events['game_id'] = str(match_id)
         df_events['sequence'] = df_events.groupby(['game_id', 'timestamp', 'participant_id', 'type']).cumcount()
@@ -279,12 +282,12 @@ class RiotApi:
             df_entries = df_entries.set_index(['summoner_id', 'queue_type'])
             return df_entries
 
-
         elif any(i in kwargs for i in ['summoner_name', 'account_id', 'puuid']):
             summoner = self.get_summoner(**kwargs).reset_index().iloc[0, :]
             return self.get_league_entries_of_summoner(**{**summoner.to_dict(), **kwargs})
         else:
-            raise ValueError('[summoner_id, account_id, summoner_name, puuid] is needed to get league entries of summoner')
+            raise ValueError(
+                '[summoner_id, account_id, summoner_name, puuid] is needed to get league entries of summoner')
 
     def __extract_match_data(self, data: json) -> Dict[str, pd.DataFrame]:
         game = pd.json_normalize(data)
@@ -316,7 +319,7 @@ class RiotApi:
         participants.columns = map(lambda x: re.sub('player.', '', x), participants.columns)
         participants.columns = map(self.__snake_case, participants.columns)
         participants = participants.set_index(['game_id', 'participant_id'])
-        #participants['summoner_name'] = participants['summoner_name'].apply(lambda val: unicodedata.normalize('NFKD', val).encode('ascii', 'ignore').decode())
+        # participants['summoner_name'] = participants['summoner_name'].apply(lambda val: unicodedata.normalize('NFKD', val).encode('ascii', 'ignore').decode())
         return {'participants': participants}
 
     def __extract_stats_data(self, data: json) -> Dict[str, pd.DataFrame]:
@@ -353,14 +356,15 @@ class RiotApi:
         for value in content['data'].values():
             table = table.append(pd.json_normalize(value, sep='_'), ignore_index=True)
         table.columns = map(self.__snake_case, table)
-        table.columns = table.columns.str.replace('stats_', '')
+        table.columns = [column.replace('stats_', '') for column in table.columns]
         table.rename(columns={'key': 'champion_id'}, inplace=True)
         table.drop(columns=['id'], inplace=True)
         table.set_index('champion_id', inplace=True)
         table['tags'] = table.tags.apply(lambda x: ', '.join(x))
         return table
 
-    def get_versions(self) -> pd.DataFrame:
+    @staticmethod
+    def get_versions() -> pd.DataFrame:
         versions = requests.get(endpoints['ddragon']['version']).json()
         return pd.DataFrame(versions)
 
