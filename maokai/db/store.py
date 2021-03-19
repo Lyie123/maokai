@@ -1,19 +1,22 @@
-from datetime import datetime
-import pandas as pd
-from sqlalchemy.orm.exc import NoResultFound
 from ..api.league import RiotApi, QueueType, logging
+
+import pandas as pd
+from datetime import datetime
+
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import NoResultFound
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+
 from .models.summoner import Summoner
 from .models.match import Match
+from .models.league import League, LeagueHistory
 from .common import Base
 
 
 class LeagueDB:
     def __init__(self, con: str, api_key: str):
         self.engine = create_engine(con)
-        self.Session = sessionmaker(bind=self.engine)
         self.api = RiotApi(api_key)
         self.create_db_layout()
 
@@ -22,64 +25,74 @@ class LeagueDB:
 
     def update_summoner(self, summoner_name: str, number_of_games: int = 100, champion_id: int = None,
                         season_id: str = None, patch: str = None, begin_time: datetime = None,
-                        queue_id: int = None) -> None:
+                        queue_id: int = None, get_timeline_data: bool = False) -> None:
         logging.info('update summoner: {0}'.format(summoner_name))
-        session = self.Session()
-        try:
-            df_summoner = self.api.get_summoner(summoner_name=summoner_name)
-            if df_summoner.empty:
-                logging.info('summoner with name {0} not found'.format(summoner_name))
-                return
-
-            summoner = Summoner(**df_summoner.reset_index().iloc[0])
-            session.merge(summoner)
-            session.commit()
-
+        with Session(self.engine) as session:
             try:
-                matches = self.api.get_match_history(account_id=summoner.account_id, champion=champion_id,
-                                                     endIndex=number_of_games, beginTime=begin_time, queue=queue_id)
-                if matches.empty:
-                    logging.info('no new matches for summoner {0}'.format(summoner_name))
+                # get summoner informations
+                df_summoner = self.api.get_summoner(summoner_name=summoner_name)
+                if df_summoner.empty:
+                    logging.info('summoner with name {0} not found'.format(summoner_name))
                     return
 
-                query = session.query(Match).filter(Match.game_id.in_([str(n) for n in matches.game_id.values]))
-                matches_already_loaded = pd.read_sql(sql=query.statement, con=session.bind)
-                if matches_already_loaded.empty:
-                    new_matches = matches.game_id.values
-                else:
-                    new_matches = matches[~matches.game_id.isin(matches_already_loaded.game_id)].game_id.values
+                summoner = Summoner(**df_summoner.reset_index().iloc[0])
+                session.merge(summoner)
+                session.commit()
 
-                logging.info('{0} out of {1} are new matches'.format(len(new_matches), len(matches)))
-                for match in new_matches:
-                    try:
-                        details = self.api.get_match_details(match)
-                        for name, table in details.items():
-                            try:
-                                table.to_sql(name=name, con=session.bind, if_exists='append')
-                            except IntegrityError:
-                                pass
+                # get league informations about summoner
+                df_league_entries = self.api.get_league_entries_of_summoner(summoner_id=summoner.summoner_id)
 
-                        timeline = self.api.get_timeline(match)
-                        for name, table in timeline.items():
-                            table = table.applymap(str)
-                            table.to_sql(name=name, con=session.bind, if_exists='append')
+                # check if league is already created
+                for idx, entry in df_league_entries.reset_index().iterrows():
+                    df_league = self.api.get_league(entry.league_id)['league']
+                    session.merge(League(**df_league.reset_index().iloc[0]))
+                    session.commit()
 
-                        logging.info('Merged {0} successfully'.format(match))
-                    except Exception as e:
-                        logging.error('error while gathering match details for game_id {0}'.format(match))
-                        logging.error(str(e))
-                        pass
-            except NoResultFound as e:
-                logging.info('no new matches for summoner {0}'.format(summoner_name))
-                pass
+                    cols = ['summoner_id', 'league_id', 'league_points', 'wins', 'losses']
+                    session.add(LeagueHistory(**entry[cols]))
+                    session.commit()
+
+                try:
+                    matches = self.api.get_match_history(account_id=summoner.account_id, champion=champion_id,
+                                                         endIndex=number_of_games, beginTime=begin_time, queue=queue_id)
+                    if matches.empty:
+                        logging.info('no new matches for summoner {0}'.format(summoner_name))
+                        return
+
+                    # check which matches are already stored in database
+                    query = select(Match).where(Match.game_id.in_(matches.game_id))
+                    db_matches = pd.read_sql(sql=query, con=session.bind)
+                    new_matches = matches[~matches.game_id.isin(db_matches.game_id)]
+
+                    logging.info('{0} out of {1} are new matches'.format(len(new_matches), len(matches)))
+                    for match in new_matches.game_id:
+                        try:
+                            details = self.api.get_match_details(match)
+                            for name, table in details.items():
+                                try:
+                                    table.to_sql(name=name, con=session.bind, if_exists='append')
+                                except IntegrityError:
+                                    pass
+
+                            if get_timeline_data:
+                                timeline = self.api.get_timeline(match)
+                                for name, table in timeline.items():
+                                    table = table.applymap(str)
+                                    table.to_sql(name=name, con=session.bind, if_exists='append')
+
+                            logging.info('Merged {0} successfully'.format(match))
+                        except Exception as e:
+                            logging.error('error while gathering match details for game_id {0}'.format(match))
+                            logging.error(str(e))
+                except NoResultFound as e:
+                    logging.info('no new matches for summoner {0}'.format(summoner_name))
+                    pass
+                except Exception as e:
+                    logging.error('error while gathering game_id data for summoner {0}'.format(summoner_name))
+                    logging.error(str(e))
             except Exception as e:
-                logging.error('error while gathering game_id data for summoner {0}'.format(summoner_name))
+                logging.error('error while gathering summoner data for summoner {0}'.format(summoner_name))
                 logging.error(str(e))
-
-        except Exception as e:
-            logging.error('error while gathering summoner data for summoner {0}'.format(summoner_name))
-            logging.error(str(e))
-            pass
 
     def update_static_data(self) -> None:
         self._update_challenger_leaderboard()

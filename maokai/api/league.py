@@ -10,7 +10,7 @@ from datetime import datetime
 from enum import Enum
 
 
-logging.basicConfig(filename='league_api.log', level=logging.INFO, format='%(asctime)s %(message)s',
+logging.basicConfig(filename='maokai.log', level=logging.INFO, format='%(asctime)s %(message)s',
                     datefmt='%d.%m.%Y %H:%M:%S')
 
 regions = {
@@ -33,7 +33,8 @@ endpoints = {
         'challenger': '{base_uri}/lol/league/v4/challengerleagues/by-queue/{queue_type}',
         'grandmaster': '{base_uri}/lol/league/v4/grandmasterleagues/by-queue/{queue_type}',
         'master': '{base_uri}/lol/league/v4/masterleagues/by-queue/{queue_type}',
-        'entries': '{base_uri}/lol/league/v4/entries/by-summoner/{encryptedSummonerId}'
+        'entries': '{base_uri}/lol/league/v4/entries/by-summoner/{encryptedSummonerId}',
+        'league': '{base_uri}/lol/league/v4/leagues/{leagueId}'
     },
     'ddragon': {
         'champion': 'http://ddragon.leagueoflegends.com/cdn/{local}/data/en_US/champion.json',
@@ -253,6 +254,22 @@ class RiotApi:
         result = self.__post_query(query)
         return self.__extract_leaderboard(result)
 
+    def get_league(self, league_id: str) -> Dict[str, pd.DataFrame]:
+        query = endpoints['league_v4']['league'].format(base_uri=self._base_uri,
+                                                        leagueId=league_id)
+        result = self.__post_query(query)
+
+        league = pd.json_normalize(result).drop(columns='entries')
+        league.columns = map(self.__snake_case, league.columns)
+        league = league.set_index('league_id')
+
+        entries = pd.json_normalize(result, record_path='entries', meta='leagueId')
+        entries = entries.loc[:, ~entries.columns.str.startswith('miniSeries')]
+        entries.columns = map(self.__snake_case, entries.columns)
+        entries = entries.set_index('league_id')
+
+        return {'league': league, 'entries': entries}
+
     def get_league_entries_of_summoner(self, **kwargs) -> pd.DataFrame:
         """Query the riot api for the league entries of a summoner.
 
@@ -319,7 +336,6 @@ class RiotApi:
         participants.columns = map(lambda x: re.sub('player.', '', x), participants.columns)
         participants.columns = map(self.__snake_case, participants.columns)
         participants = participants.set_index(['game_id', 'participant_id'])
-        # participants['summoner_name'] = participants['summoner_name'].apply(lambda val: unicodedata.normalize('NFKD', val).encode('ascii', 'ignore').decode())
         return {'participants': participants}
 
     def __extract_stats_data(self, data: json) -> Dict[str, pd.DataFrame]:
