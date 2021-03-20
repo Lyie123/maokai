@@ -2,7 +2,7 @@
 name = "maokai"
 version = "0.1.0"
 description = "wrapper for riot api and store it in sql database"
-authors = "moch.rene@googlemail.com"
+authors = ["Moch Rene <moch.rene@googlemail.com>"]
 
 [tool.poetry.dependencies]
 python = "^3.8"
