@@ -84,6 +84,10 @@ class RiotApi:
         sleep(self._query_delay_time)
         r = requests.get(query, headers=self._header)
 
+        # retry if certain status code
+        if r.status_code == 504:
+            r = requests.get(query, headers=self._header)
+
         # query was succesful 
         if r.status_code == 200:
             self._api_calls.append('{time}: {query}'.format(time=datetime.now(), query=query))
